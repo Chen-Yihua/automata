@@ -41,11 +41,11 @@ def find_trace(G, error_location, edge_mapping, start):
     path = dijkstra(G, error_location, start) # 找出走到 error location 的最短 trace
     expr1 = weakest_precondition(True, False, path) # 計算其 annotation
     print("shortest_error_path :", path)
-    dfa = build_dfa(G, path, edge_mapping, start, error_location)
+    dfa = build_dfa(G, path, edge_mapping, start, error_location) # 製作 dfa
     
     cycles = find_all_cycles(start) # 找出程式中的 loop
-    for cycle in cycles: # 檢查加入 loop 後的 trace，能否從起始位置走到錯誤位置
-        new_path = update_path(path, cycle)
+    for cycle in cycles:
+        new_path = update_path(path, cycle) # 將 loop 加入 path
         expr2 = weakest_precondition(True, False, new_path) # 計算加入 loop 後的 annotation
         solver = Solver() # 若加入 loop 後，annotation 不變，則可更新 dfa
         solver.add(expr1 != expr2)
@@ -125,8 +125,8 @@ def weakest_precondition(pre, post, path):
     p, n = Ints("p n")
     for i in range(len(path)-1, 0, -1):
         edge = G[path[i-1], path[i]] # 取出 trace 中的邊
-        # 處理賦值表達式
-        assignment_pattern = r'(\w+)\s*=\s*([^=].*)'
+        # 處理賦值表達式，使其在 begin 中能使用
+        assignment_pattern = r'(\w+)\s*=\s*([^=].*)' # 將等式的左值與右值分開
         match = re.match(assignment_pattern, edge['label'])
         if match:
             left_side = match.group(1).strip()
@@ -139,8 +139,8 @@ def weakest_precondition(pre, post, path):
     prog = begin(
     *label
     )
-    verify_fun(True, False, prog) # 可從起始位置走到 error location
-    wp = prog(post) # 其 annotation
+    verify_fun(True, False, prog) # 查看是否可從起始位置走到 error location
+    wp = prog(post) # 回傳其 annotation
     return wp
 
 # 做 DFA
@@ -212,12 +212,6 @@ def difference_dfa(dfa1, dfa2):
         final_states = final_states
     )
     return diff_dfa, initial_state, final_states
-
-    # # 將 stage 編號改回中文
-    # for state, transitions in new_dfa.transitions.items():
-    #     new_state = node_mapping[state]
-    #     update_states.append(new_state)
-    #     update_transitions[new_state] = {symbol: node_mapping[next_state] for symbol, next_state in transitions.items()}  
 
 def update_path(path, cycle):
     new_paths = path.copy()
@@ -331,11 +325,9 @@ print("trace : ",trace)
 # 找出其他 trace
 diff, initial_state, final_state = difference_dfa(total_dfa, dfa)
 # print("dfa_all 與 dfa 之差集 : ",diff)
-# print(diff.initial_state)
 G = draw_dfa(diff, edge_mapping)
-# print("final_state : ", next(iter(final_state)))
 trace, dfa2 = find_trace(G, next(iter(final_state)), edge_mapping, initial_state)
-# print("trace : ",trace)
+print("trace : ",trace)
 
 # 將所有 dfa 做聯集
 # dfa_union = dfa.union(dfa2)

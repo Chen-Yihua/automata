@@ -7,12 +7,12 @@ import heapq
 import re
  
 # 畫出 Control flow graph
-def cfw(G):
-    dot = Digraph()  # 創建圖
-    for (i, j), label in G.items():  # 畫點與邊
-        dot.edge(i, j, label=label['label'])
-    dot.render('cfg', format='png', view=True)  # render 圖片
-    return G
+# def cfw(G):
+#     dot = Digraph()  # 創建圖
+#     for (i, j), label in G.items():  # 畫點與邊
+#         dot.edge(i, j, label=label['label'])
+#     dot.render('cfg', format='png', view=True)  # render 圖片
+#     return G
 
 # 畫出 dfa
 def draw_dfa(dfa, edge_mapping):
@@ -41,32 +41,44 @@ def draw_dfa(dfa, edge_mapping):
 # 找出 trace 最短路徑，並建構證明
 def find_trace(G, error_location, edge_mapping, start):
     finded = False
+    # add_cycle = []
+    # G_copy = copy.deepcopy(G)  # 複製圖
+    # print(G_copy)
     while finded == False:
         path = dijkstra(G, error_location, start)  # 找出走到 error location 的最短 trace
-        expr1,unsat_var = weakest_precondition(True, False, path)  # 計算其 annotation 判斷要加進去嗎
+        expr1, unsat_var = weakest_precondition(True, False, path)  # 計算其 annotation 判斷要加進去嗎
         # 找最短路徑、算ano、若為unsat 做dfa、否則找別條最短路徑
         if expr1 == True:
             print("shortest_error_path :", path)
-            dfa = build_dfa(G, path, edge_mapping, start, error_location)  # 製作 dfa
+            unsat_condition = find_unsat_condition(unsat_var)
+            dfa = build_dfa(G, path, edge_mapping, start, error_location, unsat_condition)  # 製作 dfa
             finded = True # 找到最短路徑
-            draw_dfa(dfa, edge_mapping)  # 畫出 p 之 dfa
+        # else: # 繼續找其他路徑
+        #     path, G_copy = del_shortest_paths(G_copy, path) # 在 G_copy 刪除最短路徑
+        #     print(G_copy)
+    # del G_copy # 刪除複製的圖
 
     cycles = find_all_cycles(start)  # 找出程式中的 loop
     for cycle in cycles: # 針對每個 loop
-        new_path = update_path(path, cycle, unsat_var)  # 將 loop 加入 path
-        print("new path:",new_path)
-        expr2 = weakest_precondition(True, False, new_path)  # 計算加入 loop 後的 annotation
-        if expr2 == True: # 若實際程式走不到且 unsat core 一樣，以此新的 path 更新 dfa
-            dfa = build_dfa(G, new_path, edge_mapping, start, error_location)  
-            print("add cycle")
-            path = new_path
+        new_path, modified = update_path(path, cycle, unsat_condition)  # 將 loop 加入 path
+        # if (modified == True):
+            # condition = unsat_condition
+            # continue
+        if modified == False:
+            # add_cycle.append(cycle)
+            expr2, unsat_var = weakest_precondition(True, False, new_path)  # 計算加入 loop 後的 annotation
+            if expr2 == True: # 若實際程式走不到且 unsat core 一樣，以此新的 path 更新 dfa
+                # dfa = build_dfa(G, new_path, edge_mapping, start, error_location, condition)  
+                print("unsat_condition:",unsat_condition)
+                dfa = build_dfa(G, new_path, edge_mapping, start, error_location, unsat_condition)
+                path = new_path
+        # else : continue
+    print("path : ", path)
     draw_dfa(dfa, edge_mapping)  # 畫出 p 之 dfa
     return path, dfa
 
 # 找出最短路徑
 def dijkstra(G, end, start):
-    # paths = []
-    # for error_node in end:
     nodes = set()  # 存放節點與邊
     for edge in G:
         u, v = edge
@@ -93,11 +105,15 @@ def dijkstra(G, end, start):
             if u == current_node:
                 weight = 1
                 distance = current_distance + weight
-                new_distance = current_distance + distance
-                if new_distance < distances[v]:
-                    distances[v] = new_distance
+                if distance < distances[v]:
+                    distances[v] = distance
                     previous_nodes[v] = current_node
-                    heapq.heappush(priority_queue, (new_distance, v))
+                    heapq.heappush(priority_queue, (distance, v))
+                # new_distance = current_distance + distance
+                # if new_distance < distances[v]:
+                #     distances[v] = new_distance
+                #     previous_nodes[v] = current_node
+                #     heapq.heappush(priority_queue, (new_distance, v))
 
     # 輸出路徑
     path = []
@@ -106,22 +122,30 @@ def dijkstra(G, end, start):
         path.append(node)
         node = previous_nodes[node]
     path.reverse()
-        # paths.append(path)
-    
-    # 針對每個 error node，判斷哪一條路徑最短
-    # for i in range(len(paths)):
-    #     if len(paths[0]) < len(paths[i]):
-    #         swap = paths[0]
-    #         paths[i] = swap
-    #         paths[0] = paths[i]
     return path
+
+# 排除最短路徑，以找第二短的路徑
+# def del_shortest_paths(G, path):
+#     # paths = []
+#     # for _ in range(2):
+#     #     path = dijkstra(G, start, end)
+#     #     if not path:
+#     #         break
+#     #     paths.append(path)
+        
+#     # 排除當前找到的路徑的每一條邊
+#     for i in range(len(path) - 1):
+#         u = path[i]
+#         v = path[i + 1]
+#         if (u, v) in G:
+#             del G[(u, v)]
+#     return path, G
 
 # 拆解 s 之 assertion，添加與變數相關之 statement，並回傳 solver
 def tracked_wp(wp, s, tracked_conditions, i): 
     if is_implies(wp):
         pre_condition = wp.arg(0)
         post_condition = wp.arg(1)
-        
         tracked_cond = Bool(f'track_cond_{i}')
         i = i + 1
 
@@ -131,7 +155,6 @@ def tracked_wp(wp, s, tracked_conditions, i):
             s.assert_and_track(pre_condition, tracked_cond)
             tracked_conditions[tracked_cond] = pre_condition
             tracked_wp(post_condition, s, tracked_conditions, i)
-
         if is_false(post_condition):
             return s    
 
@@ -145,7 +168,6 @@ def tracked_wp(wp, s, tracked_conditions, i):
 def find_unsat_core(assertions):
     tracked_conditions = {} # 用來追蹤此 infeasible path 經過哪些 statement
     unsat_core = [] # 存放 unsat core
-    # unsat_var = []
     s = Solver()
     s.set(unsat_core = True)
     p = Int('p')
@@ -159,12 +181,23 @@ def find_unsat_core(assertions):
     for statement in core:
         unsat_core.append(tracked_conditions[statement])
     
-    for constraint in unsat_core:
+    for constraint in unsat_core: # 找出衝突變數
         for child in constraint.children():
                 if p.eq(child):
                     return p
                 if n.eq(child):
                     return n
+
+def find_unsat_condition(unsat_var):
+    edges = set()
+    assignment_pattern = rf'({unsat_var})\s*=\s*([^=].*)'
+    unsat_condition = NULL
+    for edge, properties in G.items():
+        edges.add(properties['label'])
+    for edge in edges:
+        if re.match(assignment_pattern, str(edge)): # 若有賦值操作，則變量被修改
+            unsat_condition = edge
+    return unsat_condition
 
 def set_(v, e):
     return lambda post: substitute(post, (v, e))
@@ -185,7 +218,7 @@ def begin(*args):
 
 # 利用 weakest precondition，算出 annotation，Construct proof
 def weakest_precondition(pre, post, path, invariant = None):
-    label = []
+    edge_label = [] # r記錄此路徑的邊
     p, n = Ints("p n")
     for i in range(0, len(path)-1, 1):
         edge = G[path[i], path[i+1]]  # 取出 trace 中的邊
@@ -200,144 +233,112 @@ def weakest_precondition(pre, post, path, invariant = None):
                 right_side = IntVal(right_side)
             else:
                 right_side = eval(right_side)
-            label.append(set_(left_side, right_side))
+            edge_label.append(set_(left_side, right_side))
         else:
-            label.append(eval(edge['label']))  # 取得邊的內容，並轉成 z3 可讀的形式
+            edge_label.append(eval(edge['label']))  # 取得邊的內容，並轉成 z3 可讀的形式
     prog = begin(
-        *label
+        *edge_label
     )
     # 查看是否可從起始位置走到 error location
     result, s = verify_fun(BoolVal(True), BoolVal(False), prog)  
     if str(result) == "unsat":
         unsat_var = find_unsat_core(s) # 找出 unsat core
-         # 找出衝突變數
         return True, unsat_var
     else: return False, NULL
 
 
 # 做 DFA
-def build_dfa(G, path, mapping, start, end):
+def build_dfa(G, path, mapping, start, end, unsat_condition):
     states = set()
     input_symbols = set()
+    path_edge = [] # 此 path 的邊
 
+    # 紀錄此 path 的邊
+    for i in range(len(path)-1):
+        edge = G[path[i], path[i+1]]
+        path_edge.append(edge)
     # 製作 input_symbols
     for edge, properties in G.items():
         input_symbols.add(mapping[properties['label']])
+        if properties['label'] == unsat_condition: # 找出 unsat node
+            unsat_node = edge[0]
+
     # 製作 state
     for i in range(len(path)):
         states.add(f'{path[i]}')
+    if unsat_condition != 0:
+        states.add('reject_node')
 
     # 製作 transitions
     transitions = {state: {value: state for key, value in mapping.items()}
                    for state in states}  # 初始化 transition
     for i in range(len(path)):  # 對於 path 中每個點
         for edge, properties in G.items():
-            if path[i] in edge[0] and edge[1] in path:  # 找出與此點相連的邊
-                transitions[path[i]][mapping.get(
-                    properties['label'])] = edge[1]  # 更改連接的邊
-
+            if str(path[i]) in str(edge[0]):  # 找出與此點相連的邊
+                if edge[1] in path: # 更改連接的邊
+                    transitions[str(path[i])][mapping.get(properties['label'])] = str(edge[1])  
+                # if unsat_condition in path_edge['label']:
+                # if edge[0] == unsat_node or edge[1] == unsat_node:
+                    # transitions[str(path[i])][mapping.get(properties['label'])] = 'reject_node'
+            # if properties['label'] == unsat_condition:
+                    # if unsat_condition != 0:  # 若有 unsat_condition
+                # if properties not in path_edge: # 更改不能接受的 input symbol
+                    # transitions[str(path[i])][mapping.get(properties['label'])] = 'reject_node'
+                        # 若邊不是 unsat_condition ，則將其連到 reject_node
+                # if path[i] != unsat_node and path[i] != start and path[i] != end:
+                    # transitions[str(path[i])][mapping.get(properties['label'])] = 'reject_node'
+                    # else: # 找出與此點不相連的邊
+                        # if properties['label'] == unsat_condition: # 更改不能接受的 input symbol
+                            # transitions[str(path[i])][mapping.get(unsat_condition)] = 'reject_node'
+    
     dfa = DFA(
         states = states,
         input_symbols = input_symbols,
         transitions = transitions,
-        initial_state = start,
-        final_states = {end}
+        initial_state = str(start),
+        final_states = {str(end)}
     )
-    # 測試 DFA
-    # test_strings = ['015','01234127']
-    # for string in test_strings:
-    #     if dfa.accepts_input(string):
-    #         print(f"The string '{string}' is not accepted by the DFA.")
-    #     else:
-    #         print(f"The string '{string}' is accepted by the DFA.")
-    # dfa, initial_state, final_states = forzenset_mapping(dfa)
-
     return dfa
 
-# # 做 dfa 的差集
-# def intersection_dfa(dfa1, dfa2):
-#     new_states = set()
-#     new_transitions = {}
-#     new_final_states = set()
-
-#     for state1 in dfa1.states:
-#         for state2 in dfa2.states:
-#             new_state = f'{state1}_{state2}'
-#             new_states.add(new_state)
-
-#             new_transitions[new_state] = {}
-#             for symbol in dfa1.input_symbols:
-#                 next_state1 = dfa1.transitions[state1][symbol]
-#                 next_state2 = dfa2.transitions[state2][symbol]
-#                 new_transitions[new_state][symbol] = f'{next_state1}_{next_state2}'
-
-#             # 對於 new_state，如果兩個 DFA 都可接受，則新 DFA 也可接受
-#             # if state1 in dfa1.final_states and state2 in dfa2.final_states:
-#     dfa1_final_states = forzenset_mapping(dfa1)
-#     dfa2_final_states = forzenset_mapping(dfa2)
-#     print(dfa1_final_states)
-#     new_final_states.add(f'{dfa1_final_states}_{dfa2_final_states}')
-
-#     new_initial_state = f'{dfa1.initial_state}_{dfa2.initial_state}'
-
-#     intersection = DFA(
-#         states = new_states,
-#         input_symbols = dfa1.input_symbols,
-#         transitions = new_transitions,
-#         initial_state = new_initial_state,
-#         final_states = new_final_states
-#     )
-#     print(new_final_states)
-#     return intersection, new_final_states, new_initial_state
-
-# def difference_dfa(dfa1, dfa2, mapping):
-#     # 對 DFA1 和 DFA2 的補集進行交集運算
-#     dfa2_complement = complement_dfa(dfa2)
-#     diff, final_states, initial_state = intersection_dfa(dfa1, dfa2_complement)
-
-#     return diff, final_states, initial_state
-
 # 製作 forzenset_mapping
-# def forzenset_mapping(dfa):
-#     forzenset_mapping = {}
-#     for node in dfa.final_states:
-#         forzenset_mapping[node] = str(node)
-
-#     # 處理 forzenset 的值，以便能做 dijkstra
-#     # for state, transitions in dfa.transitions.items():
-#     #     new_state = forzenset_mapping[state]
-#     #     new_states.add(new_state)
-#     #     new_transitions[new_state] = {
-#     #         symbol: forzenset_mapping.get(next_state)
-#     #         for symbol, next_state in transitions.items()
-#     #     }
-#     state = forzenset_mapping[node]
-   
-#     return state
+def forzenset_mapping(dfa):
+    forzenset_mapping = {}
+    for node in dfa.final_states:
+        forzenset_mapping[node] = node
+    state = forzenset_mapping[node]
+    return state
 
 # 判斷 loop 有無更改衝突變數，若無則可加入 path
-def update_path(path, cycle, unsat_var):
+def update_path(path, cycle, unsat_condition):
     new_paths = path.copy()
     is_connect = False
     modified = False
-    assignment_pattern = rf'({unsat_var})\s*=\s*([^=].*)'
+    # assignment_pattern = rf'({unsat_var})\s*=\s*([^=].*)'
+    # loop_location = []
+    # unsat_condition = NULL
 
     for node in cycle:  # 判斷 loop 與 最短路徑相連嗎
         if node in path:
             loop_start = path.index(node) + 1
+            # loop_location.append(loop_start-1)
             is_connect = True
+            break
     for i in range(len(cycle)-1):
-        edge = G[cycle[i], cycle[i+1]] 
-        if re.match(assignment_pattern, edge['label']): # 若有賦值操作，則變量被修改
-            modified = True  
+        edge = G[cycle[i], cycle[i+1]]
+        # unsat_condition = find_unsat_condition(edge['label'], unsat_var)
+        if edge['label'] == unsat_condition:
+            modified = True
+        # if re.match(assignment_pattern, edge['label']): # 若有賦值操作，則變量被修改
+            # modified = True 
+            # unsat_condition = edge['label']
         
-
-    if is_connect == True and modified == False:  # 若相連，則將 loop 加入 path
+    if is_connect == True and modified == False:  # 若相連，且變量未被修改，則將 loop 加入 path
         for node in cycle[1:]:  # 從第二個元素開始加
             new_paths.insert(loop_start, node)
             loop_start = loop_start + 1
+    # loop_location.append(loop_start-1)
 
-    return new_paths
+    return new_paths, modified
 
 # 尋找圖中的 loop 有無self loop
 def find_all_cycles(start): 
@@ -352,10 +353,11 @@ def find_all_cycles(start):
         for key, value in G.items():  # 找出 neighbor
             if v == key[0]:
                 neighbor = key[1]
+                if neighbor == v: # 如果 neighbor 等於 v，則跳過自我迴圈的檢查
+                    continue 
                 if neighbor not in visited:
                     dfs(neighbor, visited, stack, all_cycles)
-                elif neighbor in stack:
-                    # 在 stack 找 neighbor 的位置
+                elif neighbor in stack: # 在 stack 找 neighbor 的位置
                     cycle_start = stack.index(neighbor)
                     cycle = stack[cycle_start:] + [neighbor]
                     if cycle not in all_cycles:  # 若此 loop 沒被找過，則加入 loop 集合
@@ -378,11 +380,7 @@ G = {
     ('Node4', 'Node1'): {'label': 'n = n - 1'},
 }
 
-taken = False  # 紀錄取過 trace 了嗎
 complete = False  # 紀錄 trace 皆已取完了嗎
-# nodes = []  # 記錄所有節點
-mapping = {}  # 紀錄所有邊，並對邊做 mapping
-i = 0
 edge_mapping = {
     'p != 0': '0',
     'n >= 0': '1',
@@ -408,41 +406,25 @@ total_dfa = DFA(
     initial_state='Node0',
     final_states={'Nodeerr'}
 )
-
-# for edge, properties in G.items():
-#     mapping[properties['label']] = f'{i}'
-#     i = i + 1
-#     if edge[0] not in nodes:
-#         nodes.append(edge[0])
-#     if edge[1] not in nodes:
-#         nodes.append(edge[1])
-
-cfw(G) # 製作 control flow graph
+# cfw(G) # 製作 control flow graph
+G = draw_dfa(total_dfa, edge_mapping)
 
 # 找出第一條 trace
 trace, dfa1 = find_trace(G, 'Nodeerr', edge_mapping, 'Node0')
-print("trace : ", trace)
 
 # 找出其他 trace
-# while complete == False:
-# diff, final_state, initial_state = difference_dfa(total_dfa, dfa1, edge_mapping)
-diff = total_dfa.difference(dfa1)
-if(diff.isempty() != True):
-    trace, dfa2 = find_trace(G, diff.final_state, edge_mapping, diff.initial_state)
-G = draw_dfa(diff, edge_mapping) # 畫出差集後的圖
-# print("trace : ", trace)
-
-# 將所有 dfa 做聯集
-# dfa_union = dfa.union(dfa2)
-
-# # 將 dfa_all 和 dfa_union 做差集
-# dfa_diff = total_dfa.difference(dfa_union)
-
-# # 檢查 dfa_diff 是否為空
-# if not dfa_diff.final_states:
-#     print("dfa_all 包含於 dfa 聯集")
-#     complete = True
-#     break
-# else:
-#     print("dfa_all 不包含於 dfa 聯集")
-#     dfa = dfa_union
+while complete == False:
+    diff = total_dfa.difference(dfa1)
+    # print(total_dfa)
+    # print(dfa1)
+    G = draw_dfa(diff, edge_mapping) # 畫出差集後的圖
+    if(diff.isempty() != True): # 若差集完非空，則繼續找 trace
+        trace, dfa2 = find_trace(G, forzenset_mapping(diff), edge_mapping, diff.initial_state)
+        # print(diff)
+        # print(dfa2)
+        # diff = diff.difference(dfa2, retain_names = True)
+        # G = draw_dfa(diff, edge_mapping)
+        total_dfa = diff
+        dfa1 = dfa2
+    else:
+        complete = True

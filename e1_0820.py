@@ -41,7 +41,7 @@ def find_trace(G, error_location, edge_mapping, start):
     # print(G_copy)
     while finded == False:
         path = dijkstra(G, error_location, start)  # 找出走到 error location 的最短 trace
-        expr1, unsat_var = weakest_precondition(True, False, path)  # 計算其 annotation 判斷要加進去嗎
+        expr1, unsat_var, unsat_core = weakest_precondition(True, False, path)  # 計算其 annotation 判斷要加進去嗎
         # 找最短路徑、算ano、若為unsat 做dfa、否則找別條最短路徑
         if expr1 == True:
             print("shortest_error_path :", path)
@@ -57,11 +57,13 @@ def find_trace(G, error_location, edge_mapping, start):
 
     cycles = find_all_cycles(start)  # 找出程式中的 loop
     for cycle in cycles: # 針對每個 loop
-        new_path, modified = update_path(path, cycle, unsat_condition)  # 將 loop 加入 path
-        if modified == False:
-            expr2, unsat_var = weakest_precondition(True, False, new_path)  # 計算加入 loop 後的 annotation
-            if expr2 == True: # 若實際程式走不到且 unsat core 一樣，以此新的 path 更新 dfa
+        new_path, modified = update_path(path, cycle, unsat_condition, unsat_core)  # 將 loop 加入 path
+        expr2, unsat_var, unsat_core = weakest_precondition(True, False, new_path)
+        if modified == False and expr2 == True:
+              # 計算加入 loop 後的 annotation
+             # 若實際程式走不到且 unsat core 一樣，以此新的 path 更新 dfa
                 dfa = build_dfa(G, new_path, edge_mapping, start, error_location, unsat_condition)
+                print("add cycle:", cycle)
                 path = new_path
     print("trace : ", path)
     draw_dfa(dfa, edge_mapping)  # 畫出 p 之 dfa
@@ -164,14 +166,15 @@ def find_unsat_core(assertions):
     s.check()
     core = s.unsat_core() # 找出 unsat core set
     for statement in core:
-        unsat_core.append(tracked_conditions[statement])
+        unsat_core.append(tracked_conditions[statement])   
+    print("unsat core : ", unsat_core)
     
     for constraint in unsat_core: # 找出衝突變數
         for child in constraint.children():
                 if p.eq(child):
-                    return p
+                    return p, unsat_core
                 if n.eq(child):
-                    return n
+                    return n, unsat_core
 
 # 找出 unsat condition
 def find_unsat_condition(unsat_var):
@@ -228,9 +231,9 @@ def weakest_precondition(pre, post, path, invariant = None):
     # 查看是否可從起始位置走到 error location
     result, s = verify_fun(BoolVal(True), BoolVal(False), prog)  
     if str(result) == "unsat":
-        unsat_var = find_unsat_core(s) # 找出 unsat core
-        return True, unsat_var
-    else: return False, NULL
+        unsat_var, unsat_core = find_unsat_core(s) # 找出 unsat core
+        return True, unsat_var, unsat_core
+    else: return False, NULL, NULL
 
 # 做 DFA
 def build_dfa(G, path, mapping, start, end, unsat_condition):
@@ -268,7 +271,6 @@ def build_dfa(G, path, mapping, start, end, unsat_condition):
             # 若 unsat_node 不在 path 裡，更改走進 unsat node 的邊
             for edge, properties in G.items():
                 if edge[1] == node:
-                    # if edge[0] not in states:
                     transitions[str(edge[0])][mapping.get(properties['label'])] = str(node)
 
     dfa = DFA(
@@ -289,27 +291,49 @@ def forzenset_mapping(dfa):
     return state
 
 # 判斷 loop 有無更改衝突變數，若無則可加入 path
-def update_path(path, cycle, unsat_condition):
+def update_path(path, cycle, unsat_condition, unsat_core):
     new_paths = path.copy()
     is_connect = False
     modified = False
 
-    for node in cycle:  # 判斷 loop 與 最短路徑相連嗎
+    # 判斷 loop 與 最短路徑相連嗎
+    for node in cycle: 
         if node in path:
             loop_start = path.index(node) + 1
             is_connect = True
             break
-    for i in range(len(cycle)-1): # 判斷變量有被修改嗎
-        edge = G[cycle[i], cycle[i+1]]
-        if edge['label'] == unsat_condition:
-            modified = True
-        
-    if is_connect == True and modified == False:  # 若相連，且變量未被修改，則將 loop 加入 path
-        for node in cycle[1:]:  # 從第二個元素開始加
+
+    # 將 cycle 加入 path
+    for node in cycle[1:]:  # 從第二個元素開始加
             new_paths.insert(loop_start, node)
             loop_start = loop_start + 1
+    
+    # 找 unsat_core 的位置
+    core_index = []
+    for i in range(len(new_paths)-1):
+        for j in range(len(unsat_core)):
+            edge = G[new_paths[i], new_paths[i+1]]
+            if edge['label'] == str(unsat_core[j]):
+               core_index.append(i)
+    # 檢查 unsat_condition 是否在它們之間
+    for i in range(len(new_paths)-1):
+        edge = G[new_paths[i], new_paths[i+1]]
+        if edge['label'] == unsat_condition:
+            if core_index[0] < i and core_index[1] > i:
+                modified = True
+                break
 
-    return new_paths, modified
+    # 判斷變量有被修改嗎
+    # for i in range(len(cycle)-1): 
+    #     edge = G[cycle[i], cycle[i+1]]
+    #     if edge['label'] == unsat_condition:
+    #         modified = True
+    
+     # 若相連，且變量未被修改，則將 loop 加入 path  
+    if is_connect == True and modified == False: 
+        return new_paths, modified
+    else :
+        return path, modified
 
 def dfs(v, visited, stack, all_cycles):  # 尋找迴圈 
         stack.append(v) # 用來記錄從起點到當前節點的整個搜尋路徑，以判斷 loop 的位置

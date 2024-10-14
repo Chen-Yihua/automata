@@ -34,14 +34,14 @@ def draw_dfa(dfa, edge_mapping):
     return G
 
 # 找出 trace 最短路徑，並建構證明
-def find_trace(G, error_location, edge_mapping, start):
+def find_trace(G, error_location, edge_mapping, start, edge):
     finded = False
     # add_cycle = []
     # G_copy = copy.deepcopy(G)  # 複製圖
     # print(G_copy)
     while finded == False:
         path = dijkstra(G, error_location, start)  # 找出走到 error location 的最短 trace
-        expr1, unsat_var, unsat_core = weakest_precondition(True, False, path)  # 計算其 annotation 判斷要加進去嗎
+        expr1, unsat_var, unsat_core = weakest_precondition(True, False, path, edges)  # 計算其 annotation 判斷要加進去嗎
         # 找最短路徑、算ano、若為unsat 做dfa、否則找別條最短路徑
         if expr1 == True:
             print("shortest_error_path :", path)
@@ -57,14 +57,12 @@ def find_trace(G, error_location, edge_mapping, start):
 
     cycles = find_all_cycles(start)  # 找出程式中的 loop
     for cycle in cycles: # 針對每個 loop
-        new_path, modified = update_path(path, cycle, unsat_condition, unsat_core)  # 將 loop 加入 path
-        expr2, unsat_var, unsat_core = weakest_precondition(True, False, new_path)
-        if modified == False and expr2 == True:
-              # 計算加入 loop 後的 annotation
+        new_path, modified = update_path(path, cycle, unsat_condition, unsat_core, edge)  # 將 loop 加入 path
+        if modified == False:
              # 若實際程式走不到且 unsat core 一樣，以此新的 path 更新 dfa
-                dfa = build_dfa(G, new_path, edge_mapping, start, error_location, unsat_condition)
-                print("add cycle:", cycle)
-                path = new_path
+            dfa = build_dfa(G, new_path, edge_mapping, start, error_location, unsat_condition)
+            print("add cycle:", cycle)
+            path = new_path
     print("trace : ", path)
     draw_dfa(dfa, edge_mapping)  # 畫出 p 之 dfa
     return path, dfa
@@ -152,7 +150,7 @@ def tracked_wp(wp, s, tracked_conditions, i):
     return s
 
 # 取出 solvor 的條件，遞迴拆解條件
-def find_unsat_core(assertions):
+def find_unsat_core(assertions, edges, edge_label):
     tracked_conditions = {} # 用來追蹤此 infeasible path 經過哪些 statement
     unsat_core = [] # 存放 unsat core
     s = Solver()
@@ -165,16 +163,30 @@ def find_unsat_core(assertions):
         tracked_wp(assertion, s, tracked_conditions, 0)
     s.check()
     core = s.unsat_core() # 找出 unsat core set
-    for statement in core:
-        unsat_core.append(tracked_conditions[statement])   
+    for statement in core:  
+        if str(tracked_conditions[statement]) in edges:
+            unsat_core.append(tracked_conditions[statement])
+        else:
+            condition = update_unsat_core(tracked_conditions[statement])
+            unsat_core.append(condition)
+
     print("unsat core : ", unsat_core)
     
     for constraint in unsat_core: # 找出衝突變數
-        for child in constraint.children():
-                if p.eq(child):
-                    return p, unsat_core
-                if n.eq(child):
-                    return n, unsat_core
+        if isinstance(constraint, str) == False:
+            for child in constraint.children():
+                    if p.eq(child):
+                        return p, unsat_core
+                    if n.eq(child):
+                        return n, unsat_core
+
+# 更新 unsat_core
+def update_unsat_core(core):
+    p, n = Ints("p n")
+    condition_str = str(core) # 將條件轉換為字符串表示形式
+    updated_condition_str = re.sub(r'(\w+)\d+', r'\1', condition_str) # 移除變量名稱中的數字部分
+    updated_condition_str = updated_condition_str.replace('==', '=') # 將 == 替換為 = 
+    return updated_condition_str
 
 # 找出 unsat condition
 def find_unsat_condition(unsat_var):
@@ -188,25 +200,40 @@ def find_unsat_condition(unsat_var):
             unsat_condition = edge
     return unsat_condition
 
-def set_(v, e):
-    return lambda post: substitute(post, (v, e))
+def substitute(t, *m, num):
+    v, e = m[0]  # 取出變量 v 和表達式 e
+    new_var_name = f"{v}{num}"  # 將變數名改為新變數，如 n -> n1
+    new_var = Int(new_var_name)  # 創建新的 Z3 整數變量 n1
+    updated_expr = z3.substitute(t, (v, new_var)) # 使用 substitute 進行變量替換
+    return new_var, new_var == e, updated_expr
 
+def set_(v, e): # 改新變數
+    return lambda post, num: substitute(post, (v, e), num=num)
+    
 def verify_fun(pre, post, body): # check unsat
     return prove(Implies(pre, And(body(post))))
 
-def begin(*args):
+def begin(*args): # args 為一連串的表達式
     def res(post):
-        wp = post
-        for s in reversed(args):  # 假設 s 是函數
+        wp = post # 紀錄 imply 結尾表達式
+        counter = {}  # 用來記錄每個變量的替換次數
+
+        for s in reversed(args): # 假設 s 是函數
             if callable(s):
-                wp = s(wp)
-            else:
-                wp = Implies(s, wp)  # 若 s 是 Z3 的 BoolRef 對象，使用 Implies
+                # 執行 s 函數，得到賦值操作表達式
+                new_var, new_condition, wp = s(wp, 1)  # 使用 1 作為初始替換計數
+                if new_var not in counter: # 初始化計數器
+                    counter[new_var] = 1
+                else: counter[new_var] += 1 # 增加計數器
+                new_var, new_condition, wp = s(wp, counter[new_var])
+                wp = Implies(new_condition, wp)
+            else: # 若 s 是 Z3 的 BoolRef 對象，使用 Implies
+                wp = Implies(s, wp) # 紀錄 imply 過程
         return wp
     return res
 
 # 利用 weakest precondition，算出 annotation，Construct proof
-def weakest_precondition(pre, post, path, invariant = None):
+def weakest_precondition(pre, post, path, edges, invariant = None):
     edge_label = [] # r記錄此路徑的邊
     p, n = Ints("p n")
     for i in range(0, len(path)-1, 1):
@@ -231,7 +258,7 @@ def weakest_precondition(pre, post, path, invariant = None):
     # 查看是否可從起始位置走到 error location
     result, s = verify_fun(BoolVal(True), BoolVal(False), prog)  
     if str(result) == "unsat":
-        unsat_var, unsat_core = find_unsat_core(s) # 找出 unsat core
+        unsat_var, unsat_core = find_unsat_core(s, edges, edge_label) # 找出 unsat core
         return True, unsat_var, unsat_core
     else: return False, NULL, NULL
 
@@ -291,8 +318,9 @@ def forzenset_mapping(dfa):
     return state
 
 # 判斷 loop 有無更改衝突變數，若無則可加入 path
-def update_path(path, cycle, unsat_condition, unsat_core):
+def update_path(path, cycle, unsat_condition, unsat_core, edges):
     new_paths = path.copy()
+    new_unsat_core = unsat_core.copy()
     is_connect = False
     modified = False
 
@@ -302,35 +330,32 @@ def update_path(path, cycle, unsat_condition, unsat_core):
             loop_start = path.index(node) + 1
             is_connect = True
             break
-
-    # 將 cycle 加入 path
-    for node in cycle[1:]:  # 從第二個元素開始加
-            new_paths.insert(loop_start, node)
-            loop_start = loop_start + 1
-    
+                
     # 找 unsat_core 的位置
     core_index = []
-    for i in range(len(new_paths)-1):
-        for j in range(len(unsat_core)):
-            edge = G[new_paths[i], new_paths[i+1]]
-            if edge['label'] == str(unsat_core[j]):
-               core_index.append(i)
-    # 檢查 unsat_condition 是否在它們之間
-    for i in range(len(new_paths)-1):
-        edge = G[new_paths[i], new_paths[i+1]]
-        if edge['label'] == unsat_condition:
-            if core_index[0] < i and core_index[1] > i:
-                modified = True
-                break
+    index = 0 # 紀錄查看到 path 的哪個位置
+    for i in range(len(new_unsat_core)):
+        for j in range(len(path)-1):
+            edge = G[path[j], path[j+1]]
+            if edge['label'] == str(new_unsat_core[i]) and j >= index:
+                core_index.append(j)
+                index = j
 
-    # 判斷變量有被修改嗎
-    # for i in range(len(cycle)-1): 
-    #     edge = G[cycle[i], cycle[i+1]]
-    #     if edge['label'] == unsat_condition:
-    #         modified = True
+    # 檢查 unsat_condition 是否在它們之間，且變量有無被修改
+    for i in range(len(core_index)-1):
+        if core_index[i] < loop_start and core_index[i+1] >= loop_start:
+            for j in range(len(cycle)-1):
+                edge = G[cycle[j], cycle[j+1]]
+                if edge['label'] == unsat_condition:
+                    modified = True
+                    break
     
      # 若相連，且變量未被修改，則將 loop 加入 path  
     if is_connect == True and modified == False: 
+        # 將 cycle 加入 path
+        for node in cycle[1:]:  # 從第二個元素開始加
+            new_paths.insert(loop_start, node)
+            loop_start = loop_start + 1
         return new_paths, modified
     else :
         return path, modified
@@ -385,6 +410,7 @@ edge_mapping = {
     'p = 0': '5',
     'n = n - 1': '6'
 }
+edges =['p != 0', 'n >= 0', 'p == 0', 'n == 0', 'n != 0', 'p = 0', 'n = n - 1']
 
 # 做 DFA
 total_dfa = DFA(
@@ -405,14 +431,14 @@ total_dfa = DFA(
 G = draw_dfa(total_dfa, edge_mapping)
 
 # 找出第一條 trace
-trace, dfa1 = find_trace(G, 'Nodeerr', edge_mapping, 'Node0')
+trace, dfa1 = find_trace(G, 'Nodeerr', edge_mapping, 'Node0', edges)
 
 # 找出其他 trace
 while complete == False:
     diff = total_dfa.difference(dfa1)
     G = draw_dfa(diff, edge_mapping) # 畫出差集後的圖
     if(diff.isempty() != True): # 若差集完非空，則繼續找 trace
-        trace, dfa2 = find_trace(G, forzenset_mapping(diff), edge_mapping, diff.initial_state)
+        trace, dfa2 = find_trace(G, forzenset_mapping(diff), edge_mapping, diff.initial_state, edges)
         total_dfa = diff
         dfa1 = dfa2
     else:

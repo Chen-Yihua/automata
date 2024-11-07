@@ -25,46 +25,13 @@ def begin(*args): # args 為一連串的表達式
                     counter[new_var] = 1
                 else: counter[new_var] += 1 # 增加計數器
                 new_var, new_condition, wp = s(wp, counter[new_var])
+                wp = Implies(new_condition, wp)
                 intermediate_condition.append(new_condition)
-                # wp = Implies(new_condition, wp)
             else: # 若 s 是 Z3 的 BoolRef 對象，使用 Implies
+                wp = Implies(s, wp) # 紀錄 imply 過程
                 intermediate_condition.append(s)
-                # wp = Implies(s, wp) # 紀錄 imply 過程
-        # return wp
-        return intermediate_condition
+        return wp
     return res
-
-# 將替換結果組合成 Implies 條件
-def combine_implies(intermediate_condition, post):
-    for _, condition, expr in intermediate_condition:
-        if condition is not None:
-            post = Implies(condition, post)
-        elif expr is not None:
-            post = Implies(expr, post)
-    return post
-
-# 變量替換函式，回傳替換後的條件列表
-# def substitute_conditions(args, post):
-#     counter = {}  # 用來記錄每個變量的替換次數
-#     intermediate_results = []  # 儲存替換後的條件
-
-#     for s in reversed(args):  # 從右到左依序處理表達式
-#         if callable(s):
-#             new_var, new_condition, post = s(post, counter.get(new_var, 1))  # 初次替換使用計數1
-#             counter[new_var] = counter.get(new_var, 1) + 1  # 增加計數器
-#             intermediate_results.append((new_var, new_condition, post))
-#         elif isinstance(s, BoolRef):
-#             intermediate_results.append((None, s, None))
-
-#     return intermediate_results, post
-
-# 處理一組條件式，替換變量後組成完整的 Implies 表達式
-def process_conditions(*args):
-    def substitute_and_imply(post):
-        intermediate_results, final_post = begin(args, post)
-        return combine_implies(intermediate_results, final_post)
-    return substitute_and_imply
-
 
 """利用 weakest precondition，建構不可行證明"""
 def proof(G, path, edges):
@@ -87,7 +54,7 @@ def proof(G, path, edges):
             edge_label.append(update_var(left_side, right_side))
         else:
             edge_label.append(eval(edge['label']))
-    prog = process_conditions(
+    prog = begin(
         *edge_label
     )
     # 查看一組條件式是否可從起始位置走到 error location

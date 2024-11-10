@@ -1,5 +1,6 @@
 from z3 import *
 import re
+import dfa_operations
 
 # 替換賦值表達式的變量為新變量
 def update_var(v, e): # 改新變數
@@ -33,16 +34,20 @@ def begin(*args): # args 為一連串的表達式
         return wp
     return res
 
-"""利用 weakest precondition，建構不可行證明"""
-def proof(G, path, edges):
-    edge_label = [] # 記錄此路徑的邊
+"""利用 weakest precondition，將條件式 imply 起來"""
+def weakest_precondition(G, path):
+    edge_labels = [] # 記錄此路徑的邊
     p, n = Ints("p n")
     # 取得邊的內容，並轉成 z3 可讀的形式
     for i in range(0, len(path)-1, 1):
-        edge = G[path[i], path[i+1]]  # 取出 trace 中的邊
+        label = dfa_operations.find_edge(G, path[i], path[i+1])
+        print(path[i])
+        print(path[i+1])
+        print(label)
+
         # 處理賦值表達式，使其在 begin 中能使用
         assignment_pattern = r'(\w+)\s*=\s*([^=].*)'  # 將等式的左值與右值分開
-        match = re.match(assignment_pattern, edge['label'])
+        match = re.match(assignment_pattern, label)
         if match:
             left_side = match.group(1).strip()
             right_side = match.group(2).strip()
@@ -51,12 +56,18 @@ def proof(G, path, edges):
                 right_side = IntVal(right_side)
             else:
                 right_side = eval(right_side)
-            edge_label.append(update_var(left_side, right_side))
+            edge_labels.append(update_var(left_side, right_side))
         else:
-            edge_label.append(eval(edge['label']))
+            edge_labels.append(eval(label))
     prog = begin(
-        *edge_label
+        *edge_labels
     )
-    # 查看一組條件式是否可從起始位置走到 error location
-    result, s =  prove(Implies(BoolVal(True), And(prog(BoolVal(False)))))
+    result = Implies(BoolVal(True), And(prog(BoolVal(False))))
+    print(result)
+    return result
+
+# 查看一組條件式是否可從起始位置走到 error location
+def proof(G, path):
+    prove_item = weakest_precondition(G, path)
+    result, s = prove(prove_item)
     return result, s

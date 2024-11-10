@@ -10,7 +10,7 @@ operators = {
     '==': lambda x, y: Equals(x, y),
     '>': lambda x, y: GT(x, y),
     '<': lambda x, y: LT(x, y),
-    '=': lambda x, y: Equals(x, y),  # 賦值操作
+    '=': lambda x, y: Equals(y, x),  # 賦值操作
     '+': lambda x, y: Plus(x, y),
     '-': lambda x, y: Minus(x, y),
 }
@@ -18,15 +18,21 @@ operators = {
 """給定 condition list，找出 interpolant"""
 def creat_interpolant(conditions):
     extract_variables(conditions) # 取得變量
+    interpolant_list = []
     
     # 將條件從 list 解析為 PySMT 公式
     parsed_conditions = [parse_expression(cond) for cond in conditions]
     itp = Interpolator(name = "msat")
-    interpolants = itp.sequence_interpolant(parsed_conditions)
-
-    # 印出 interpolants
-    for i, interp in enumerate(interpolants):
+    try:
+        interpolants = itp.sequence_interpolant(parsed_conditions)
+        # 印出 interpolants
+        for i, interp in enumerate(interpolants):
             print(f"I_{i}: {interp}")
+            interpolant_list.append(interp)
+    except:
+        print("the path is sat")
+
+    return(interpolant_list[-1])
 
 
 # 根據條件式中的變量自動創建 Symbol
@@ -47,11 +53,17 @@ def parse_expression(expr):
     for op in operators:
         if op in expr:
             left, right = map(str.strip, expr.split(op))
-            left_var = variables.get(left, Int(int(left)) if left.isdigit() else None)
-            right_var = variables.get(right, Int(int(right)) if right.isdigit() else parse_expression(right))
+            # left_var 的解析：若是數字則轉為 Int，若是變數則從 variables 獲取，否則解析表達式
+            left_var = Int(int(left)) if left.isdigit() else variables.get(left) if left in variables else parse_expression(left)
+            # right_var 的解析：若是數字則轉為 Int，若是變數則從 variables 獲取，否則解析表達式
+            right_var = Int(int(right)) if right.isdigit() else variables.get(right) if right in variables else parse_expression(right)
+
             return operators[op](left_var, right_var)
     raise ValueError(f"無法解析的條件: {expr}")
 
 
-conditions = ['p == 0', 'n == 0', 'p != 0']
-creat_interpolant(conditions)
+# conditions = ['p != 0', 'n >= 0', 'n == 0', '0 = p1', 'n1 == n - 1', 'n1 >= 0', 'p1 == 0']
+# conditions = ['p != 0', 'n >= 0', 'n == 0', '0 == p1', 'n1 == n - 1', 'n1 >= 0', 'p1 == 0']
+# conditions = ['p != 0', 'n >= 0', 'n != 0', 'n1 == n - 1', 'n1 >= 0', 'p == 0']
+# conditions = ['p != 0', 'n >= 0', 'n == 0']
+# creat_interpolant(conditions)

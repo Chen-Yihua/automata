@@ -41,9 +41,6 @@ def weakest_precondition(G, path):
     # 取得邊的內容，並轉成 z3 可讀的形式
     for i in range(0, len(path)-1, 1):
         label = dfa_operations.find_edge(G, path[i], path[i+1])
-        print(path[i])
-        print(path[i+1])
-        print(label)
 
         # 處理賦值表達式，使其在 begin 中能使用
         assignment_pattern = r'(\w+)\s*=\s*([^=].*)'  # 將等式的左值與右值分開
@@ -63,11 +60,24 @@ def weakest_precondition(G, path):
         *edge_labels
     )
     result = Implies(BoolVal(True), And(prog(BoolVal(False))))
-    print(result)
     return result
 
 # 查看一組條件式是否可從起始位置走到 error location
 def proof(G, path):
     prove_item = weakest_precondition(G, path)
-    result, s = prove(prove_item)
+    result, s = prove_path(prove_item)
     return result, s
+
+def prove_path(claim, show=False, **keywords):
+    s = Solver()
+    s.set(**keywords)
+    s.add(Not(claim))
+    if show:
+        print(s)
+    r = s.check()
+    if r == unsat: # path is valid，永遠成立 proved
+        return("unsat", s)
+    elif r == unknown: # failed to prove
+        return("unknown", s)
+    else: # 有 counterexample
+        return("counterexample", s)

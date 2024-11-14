@@ -1,5 +1,10 @@
 from graphviz import Digraph
 from automata.fa.dfa import DFA
+from pysmt.typing import INT
+from pysmt.shortcuts import Symbol
+from z3 import *
+import unsat_core_operations
+import re
 
 edge_mapping = {
     'p != 0': '0',
@@ -10,6 +15,29 @@ edge_mapping = {
     'p = 0': '5',
     'n = n - 1': '6'
 }
+
+# 根據條件式中的變量自動創建 Symbol
+# variables = {}
+# def extract_variables(expressions):
+#     for expr in expressions:
+#         if expr == True or expr == False or expr == 'True' or expr == 'False':
+#             continue
+#         else:
+#             # 使用正則表達式來提取變量名稱
+#             matches = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', expr)
+#             for var in matches:
+#                 # 如果變量還沒有創建 Symbol，則創建並添加到字典中
+#                 if var not in variables:
+#                     variables[var] = Symbol(var, INT)
+#     return variables
+
+# 製作 forzenset_mapping
+def forzenset_mapping(nodes):
+    forzenset_mapping = {}
+    for node in nodes:
+        forzenset_mapping[node] = node
+    state = forzenset_mapping[node]
+    return state
 
 # 將邊由文字改成編號
 def get_key_from_value(mapping, value): 

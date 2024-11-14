@@ -1,7 +1,10 @@
 import heapq
+import dfa_operations
+from z3 import *
+import unsat_core_operations
 
 
-"""找出圖中指定起點與終點的最短路徑"""
+""" 找出圖中指定起點與終點的最短路徑 """
 def dijkstra(G, end, start):
     # 初始化 (每個節點的初始距離為無限大、起始節點的為0)
     vertices = G.nodes()
@@ -64,3 +67,44 @@ def find_all_cycles(G, start):
     dfs(G, str(start), visited, stack, all_cycles)
     return all_cycles
 
+""" 找 unsat_core 在 path 中的位置"""
+def find_core_index(G, core, path):
+    core_index = []
+    index = 0 # 紀錄查看到 path 的哪個位置
+    for i in range(len(core)):
+        for j in range(len(path)-1):
+            edge = dfa_operations.find_edge(G, path[j] , path[j+1])
+            if edge == str(core[i]) and j >= index:
+                core_index.append(j)
+                index = j
+    return core_index
+
+"""將 loop 加入 path """
+def add_cycle(path, cycle):
+    new_path = path.copy()
+    # 判斷 loop 與 最短路徑相連嗎
+    for node in cycle: 
+        if node in path:
+            loop_start = path.index(node) + 1
+            initial_loop_start = loop_start
+            is_connected = True
+            break
+    
+     # 若相連，則將 loop 加入 path  
+    if is_connected == True: 
+        # 將 cycle 加入 path
+        for node in cycle[1:]:  # 從第二個元素開始加
+            new_path.insert(loop_start, node)
+            loop_start = loop_start + 1
+        return initial_loop_start, new_path
+
+"""取得一條 path 的條件式"""
+def get_path_conditions(assertions):
+    tracked_conditions = {} # 用來追蹤此 infeasible path 經過哪些 statement
+    path_conditions = [] # 存放更改變量後的條件式
+    s = Solver()
+    unsat_core_operations.tracked_wp(assertions, s, tracked_conditions, 0)
+    
+    for cond in tracked_conditions:
+        path_conditions.append(str(tracked_conditions[cond]))
+    return path_conditions

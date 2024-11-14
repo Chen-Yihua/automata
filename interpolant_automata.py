@@ -1,12 +1,12 @@
 from asyncio.windows_events import NULL
 from z3 import *
 from automata.fa.dfa import DFA
-import heapq
 import get_interpolant
 import dfa_operations
 import unsat_core_operations
 import infeasible_proof
 import path_operations
+
 
 """找出 trace 最短路徑，並建構證明"""
 def find_trace(G, error_location, edge_mapping, start, edges):
@@ -16,17 +16,21 @@ def find_trace(G, error_location, edge_mapping, start, edges):
     while found_path == False:
         path = path_operations.dijkstra(G, str(error_location), str(start))  # 找出走到 error location 的最短 path
         assertions = infeasible_proof.weakest_precondition(G, path) # 將條件式做 imply
-        conditions = unsat_core_operations.get_path_conditions(assertions) # 分解 imply，並更新變量
+        conditions = path_operations.get_path_conditions(assertions) # 分解 imply，並更新變量
         interpolant = get_interpolant.creat_interpolant(conditions)
         found_path = True # 找到最短路徑
 
     for cycle in path_operations.find_all_cycles(G, start): # 找出程式中的 loop
         path_copy = path.copy()
-        new_path = update_path(path_copy, cycle)  # 將 loop 加入 path
+        loop_start, new_path = path_operations.add_cycle(path_copy, cycle)  # 將 loop 加入 path
         new_assertions = infeasible_proof.weakest_precondition(G, path) # 將條件式做 imply
-        new_conditions = unsat_core_operations.get_path_conditions(new_assertions)
+        new_conditions = path_operations.get_path_conditions(new_assertions)
         new_interpolant = get_interpolant.creat_interpolant(new_conditions)
-        if interpolant == new_interpolant:
+        dfa = dfa_operations.build_dfa(G, new_path, edge_mapping, start, error_location, reject_start)
+        dfa_operations.draw_dfa(dfa)  # 畫出 p 之 dfa
+        dfa.show_diagram()
+        infeasible_proof.prove_path(Implies(interpolant, new_interpolant))
+        if interpolant == new_interpolant: # 檢查語意
             # 若實際程式走不到且 unsat core 一樣，以此新的 path 更新 dfa
             path = new_path
         else : 
@@ -39,35 +43,12 @@ def find_trace(G, error_location, edge_mapping, start, edges):
     dfa.show_diagram()
     return path, dfa
 
-"""製作 forzenset_mapping"""
-def forzenset_mapping(dfa):
-    forzenset_mapping = {}
-    for node in dfa.final_states:
-        forzenset_mapping[node] = node
-    state = forzenset_mapping[node]
-    return state
-
-"""判斷 loop 有無更改衝突變數，若無則可加入 path"""
-def update_path(path, cycle):
-    new_path = path.copy()
-    # # 判斷 loop 與 最短路徑相連嗎
-    for node in cycle: 
-        if node in path:
-            loop_start = path.index(node) + 1
-            is_connected = True
-            break
-    
-     # 若相連，且變量未被修改，則將 loop 加入 path  
-    if is_connected == True: 
-        # 將 cycle 加入 path
-        for node in cycle[1:]:  # 從第二個元素開始加
-            new_path.insert(loop_start, node)
-            loop_start = loop_start + 1
-        return new_path
 
 # main
 complete = False  # 紀錄 trace 皆已取完了嗎
 edges =['p != 0', 'n >= 0', 'p == 0', 'n == 0', 'n != 0', 'p = 0', 'n = n - 1']
+start = 'Node0'
+end = 'Nodeerr'
 
 # 做 DFA
 total_dfa = DFA(
@@ -87,18 +68,16 @@ total_dfa = DFA(
 # cfw(G) # 製作 control flow graph
 G = total_dfa.show_diagram()
 
-# 找出第一條 trace
-trace, dfa1 = find_trace(G, 'Nodeerr', dfa_operations.edge_mapping, 'Node0', edges)
-
-# 找出其他 trace
+# 找出所有的 trace
 while complete == False:
-    diff = total_dfa.difference(dfa1)
+    trace, dfa = find_trace(G, end, dfa_operations.edge_mapping, start, edges)
+    diff = total_dfa.difference(dfa)
     G = dfa_operations.draw_dfa(diff) # 畫出差集後的圖
     G = diff.show_diagram()
     if(diff.isempty() != True): # 若差集完非空，則繼續找 trace
-        trace, dfa2 = find_trace(G, forzenset_mapping(diff), dfa_operations.edge_mapping, diff.initial_state, edges)
+        start = diff.initial_state
+        end = dfa_operations.forzenset_mapping(diff.final_states)
         total_dfa = diff
-        dfa1 = dfa2
     else:
         complete = True
         print("complete")

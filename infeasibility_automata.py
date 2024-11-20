@@ -1,6 +1,7 @@
 from asyncio.windows_events import NULL
 from z3 import *
 from automata.fa.dfa import DFA
+from visual_automata.fa.dfa import VisualDFA
 import dfa_operations
 import unsat_core_operations
 import infeasible_proof
@@ -20,13 +21,14 @@ def find_trace(G, error_location, edge_mapping, start, edges):
             unsat_condition = unsat_core_operations.find_unsat_condition(G, unsat_var) # 找出 unsat condition
             found_path = True # 找到最短路徑
 
-    for cycle in path_operations.find_all_cycles(G, start): # 找出程式中的 loop
-        loop_start, new_path = path_operations.add_cycle(path, cycle)  # 將 loop 加入 path
-        modified = check_changed_var(path, cycle, unsat_condition, unsat_core, loop_start)  # 將 loop 加入 path
-        if modified == False:
-             # 若實際程式走不到且 unsat core 一樣，以此新的 path 更新 dfa
-            path = new_path
-    dfa = dfa_operations.build_dfa(G, new_path, edge_mapping, start, error_location, unsat_condition)
+    # for cycle in path_operations.find_all_cycles(G, start): # 找出程式中的 loop
+    #     loop_start, new_path = path_operations.add_cycle(path, cycle)  # 將 loop 加入 path
+    #     modified = check_changed_var(path, cycle, unsat_condition, unsat_core, loop_start)  # 將 loop 加入 path
+    #     if modified == False:
+    #          # 若實際程式走不到且 unsat core 一樣，以此新的 path 更新 dfa
+    #         path = new_path
+    # dfa = dfa_operations.build_dfa(G, new_path, edge_mapping, start, error_location, unsat_condition)
+    dfa = dfa_operations.update_dfa(G, edge_mapping, start, error_location, unsat_condition, unsat_core)
     dfa_operations.draw_dfa(dfa)  # 畫出 p 之 dfa
     dfa.show_diagram()
     return path, dfa
@@ -71,12 +73,16 @@ total_dfa = DFA(
     final_states={'Nodeerr'}
 )
 # cfw(G) # 製作 control flow graph
+dfa_operations.draw_dfa(total_dfa)
 G = total_dfa.show_diagram()
+# dfa = VisualDFA(total_dfa) # Convert automata-lib DFA to VisualDFA
+# dfa.show_diagram(view=True)
 
 # 找出所有的 trace
 while complete == False:
     trace, dfa = find_trace(G, end, dfa_operations.edge_mapping, start, edges)
     diff = total_dfa.difference(dfa)
+    print(total_dfa.issuperset(diff))
     G = dfa_operations.draw_dfa(diff) # 畫出差集後的圖
     G = diff.show_diagram()
     if(diff.isempty() != True): # 若差集完非空，則繼續找 trace

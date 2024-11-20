@@ -7,7 +7,7 @@ def update_var(v, e): # 改新變數
     def substitute_variable(post, num):
         new_var_name = f"{v}{num}"  # 創建新變量名稱，例如 n -> n1
         new_var = Int(new_var_name)  # 創建新的 Z3 整數變量 n1
-        updated_expr = z3.substitute(post, (v, new_var))  # 使用 substitute 進行變量替換
+        updated_expr = substitute(post, (v, new_var))  # 使用 substitute 進行變量替換
         return new_var, new_var == e, updated_expr  # 返回新的變量、條件、新表達式
     return substitute_variable
 
@@ -24,7 +24,8 @@ def begin(*args): # args 為一連串的表達式
                 new_var, new_condition, wp = s(wp, 1)  # 使用 1 作為初始替換計數
                 if new_var not in counter: # 初始化計數器
                     counter[new_var] = 1
-                else: counter[new_var] += 1 # 增加計數器
+                else: 
+                    counter[new_var] += 1 # 增加計數器
                 new_var, new_condition, wp = s(wp, counter[new_var])
                 wp = Implies(new_condition, wp)
                 intermediate_condition.append(new_condition)
@@ -37,7 +38,7 @@ def begin(*args): # args 為一連串的表達式
 """利用 weakest precondition，將條件式 imply 起來"""
 def weakest_precondition(G, path):
     edge_labels = [] # 記錄此路徑的邊
-    p, n = Ints("p n")
+    p, n = Ints("p n") 
     # 取得邊的內容，並轉成 z3 可讀的形式
     for i in range(0, len(path)-1, 1):
         label = dfa_operations.find_edge(G, path[i], path[i+1])

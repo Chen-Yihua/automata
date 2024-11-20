@@ -3,7 +3,6 @@ from z3 import *
 from automata.fa.dfa import DFA
 import get_interpolant
 import dfa_operations
-import unsat_core_operations
 import infeasible_proof
 import path_operations
 
@@ -29,9 +28,8 @@ def find_trace(G, error_location, edge_mapping, start, edges):
         dfa = dfa_operations.build_dfa(G, new_path, edge_mapping, start, error_location, reject_start)
         dfa_operations.draw_dfa(dfa)  # 畫出 p 之 dfa
         dfa.show_diagram()
-        infeasible_proof.prove_path(Implies(interpolant, new_interpolant))
-        if interpolant == new_interpolant: # 檢查語意
-            # 若實際程式走不到且 unsat core 一樣，以此新的 path 更新 dfa
+        result = get_interpolant.check_interpolant_equality(interpolant, new_interpolant)
+        if result == unsat: # 檢查語意，若 interpolant 相同，更新 path
             path = new_path
         else : 
             for i in range(len(cycle)):
@@ -65,8 +63,9 @@ total_dfa = DFA(
     initial_state='Node0',
     final_states={'Nodeerr'}
 )
-# cfw(G) # 製作 control flow graph
+# 製作 control flow graph
 G = total_dfa.show_diagram()
+print(G)
 
 # 找出所有的 trace
 while complete == False:

@@ -108,3 +108,10 @@ def get_path_conditions(assertions):
     for cond in tracked_conditions:
         path_conditions.append(str(tracked_conditions[cond]))
     return path_conditions
+
+"""找出 path 用到的變量"""
+def find_path_variable():
+    return
+
+
+
